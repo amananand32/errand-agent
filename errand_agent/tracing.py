@@ -16,7 +16,8 @@ PRICING = {
     "claude-opus-5-5": (4.00, 20.00),
 }
 # Groq free tier: no charge (rate-limited). Override any price with ERRAND_PRICE_IN / ERRAND_PRICE_OUT.
-FREE_MODELS = {"llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen3-32b", "kimi-k2-instruct",
+FREE_MODELS = {"openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "minimaxai/minimax-m2.7",
+               "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen3-32b", "kimi-k2-instruct",
                "llama-4-scout-17b-16e-instruct", "llama-4-maverick-17b-128e-instruct"}
 # Offline/scripted runs report cost *as if* the default model had been used.
 COST_REFERENCE_MODEL = "claude-sonnet-5-5"

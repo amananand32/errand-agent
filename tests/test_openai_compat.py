@@ -67,9 +67,37 @@ def test_agent_books_through_groq_adapter(monkeypatch):
     env.agent.model = m
     r1 = env.say(req)
     assert r1.outcome == "proposed" and "**Confirm booking**" in r1.reply
-    assert sent[0]["tools"][0]["type"] == "function" and sent[0]["model"] == "llama-3.3-70b-versatile"
+    assert sent[0]["tools"][0]["type"] == "function" and sent[0]["model"] == "openai/gpt-oss-120b"
     assert sent[1]["messages"][-1]["role"] == "tool"          # tool result fed back in OpenAI format
     r2 = env.say("yes")                                         # approval is deterministic, no model call
     assert r2.outcome == "booked" and len(sent) == 4
     mc = env.ev("model_call")[0]
     assert mc["tokens_in"] == 1500 and mc["est_cost_usd"] == 0.0 and mc["token_counts_estimated"] is False
+
+
+def test_model_not_found_falls_back_to_an_available_model(monkeypatch, capsys):
+    """Reported by a user: Groq returned 404 model_not_found for the configured model."""
+    monkeypatch.setenv("GROQ_API_KEY", "test")
+    m = oc.OpenAICompatModel("groq", model="llama-3.3-70b-versatile")
+    calls = []
+
+    def fake_post(payload):
+        calls.append(payload["model"])
+        if payload["model"] == "llama-3.3-70b-versatile":
+            raise oc.ModelNotFound('HTTP 404: {"error":{"code":"model_not_found"}}')
+        return {"choices": [{"finish_reason": "stop", "message": {"content": "hi"}}], "usage": {}}
+
+    monkeypatch.setattr(m, "_post", fake_post)
+    monkeypatch.setattr(m, "list_models", lambda: ["openai/gpt-oss-20b", "whisper-large-v3"])
+    r = m.complete("sys", [{"role": "user", "content": "hi"}], [])
+    assert calls == ["llama-3.3-70b-versatile", "openai/gpt-oss-20b"] and m.name == "openai/gpt-oss-20b"
+    assert r.text == "hi" and "switching to 'openai/gpt-oss-20b'" in capsys.readouterr().out
+
+
+def test_model_not_found_without_alternative_is_a_clear_config_error(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "test")
+    m = oc.OpenAICompatModel("groq")
+    monkeypatch.setattr(m, "_post", lambda p: (_ for _ in ()).throw(oc.ModelNotFound("HTTP 404 model_not_found")))
+    monkeypatch.setattr(m, "list_models", lambda: ["whisper-large-v3"])
+    with pytest.raises(oc.ModelConfigError, match="check_llm --model groq --list"):
+        m.complete("sys", [{"role": "user", "content": "hi"}], [])

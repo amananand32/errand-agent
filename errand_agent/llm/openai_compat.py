@@ -23,13 +23,27 @@ PROVIDERS = {
     "grok": {"base_url": "https://api.x.ai/v1", "key_env": "XAI_API_KEY",
              "model_env": "GROK_MODEL", "default_model": "grok-4-1-fast-non-reasoning"},
     "groq": {"base_url": "https://api.groq.com/openai/v1", "key_env": "GROQ_API_KEY",
-             "model_env": "GROQ_MODEL", "default_model": "llama-3.3-70b-versatile"},
+             "model_env": "GROQ_MODEL", "default_model": "openai/gpt-oss-120b"},
     "openai-compat": {"base_url": None, "key_env": "ERRAND_API_KEY",
                       "model_env": "ERRAND_MODEL", "default_model": None},
 }
 
 
+# Tried in order when the configured model isn't available to this key (HTTP 404 model_not_found).
+# All are tool-capable per Groq's docs (console.groq.com/docs/tool-use/overview, Nov 2026).
+FALLBACKS = {
+    "groq": ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "qwen/qwen3.8-27b", "openai/gpt-oss-20b",
+             "minimaxai/minimax-m2.7", "llama-3.1-8b-instant"],
+    "grok": ["grok-4-1-fast-non-reasoning", "grok-4.3", "grok-4.6", "grok-4.5"],
+}
+NON_CHAT = ("whisper", "orpheus", "guard", "tts", "embed", "image", "vision", "safeguard")
+
+
 class ModelConfigError(RuntimeError):
+    pass
+
+
+class ModelNotFound(RuntimeError):
     pass
 
 
@@ -101,7 +115,7 @@ SSL_HELP = ("Python could not verify HTTPS certificates. On macOS run "
 
 class OpenAICompatModel(Model):
     def __init__(self, provider: str = "groq", model: str | None = None, base_url: str | None = None,
-                 api_key: str | None = None, max_tokens: int = 1024, temperature: float = 0.0,
+                 api_key: str | None = None, max_tokens: int = 2048, temperature: float = 0.0,
                  timeout_s: float = 60.0, max_retries: int = 4):
         cfg = PROVIDERS.get(provider, PROVIDERS["openai-compat"])
         self.base_url = (base_url or os.environ.get("ERRAND_BASE_URL") if provider == "openai-compat"
@@ -118,11 +132,33 @@ class OpenAICompatModel(Model):
         self.max_tokens, self.temperature = max_tokens, temperature
         self.timeout_s, self.max_retries = timeout_s, max_retries
 
+    def _headers(self) -> dict:
+        return {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json",
+                "User-Agent": "errand-agent/0.1"}
+
+    def list_models(self) -> list[str]:
+        """Model ids this API key can actually use (GET /models)."""
+        req = urllib.request.Request(self.base_url.rstrip("/") + "/models", headers=self._headers())
+        with urllib.request.urlopen(req, timeout=self.timeout_s) as r:
+            data = json.loads(r.read())
+        return sorted(m["id"] for m in data.get("data", []) if m.get("active", True) is not False)
+
+    def pick_available_model(self) -> str | None:
+        """Choose a tool-capable chat model the key has access to."""
+        try:
+            available = self.list_models()
+        except Exception:  # noqa: BLE001
+            return None
+        for m in FALLBACKS.get(self.provider, []):
+            if m in available and m != self.name:
+                return m
+        chat = [m for m in available if not any(x in m.lower() for x in NON_CHAT) and m != self.name]
+        return chat[0] if chat else None
+
     def _post(self, payload: dict) -> dict:
         req = urllib.request.Request(
             self.base_url.rstrip("/") + "/chat/completions", data=json.dumps(payload).encode(),
-            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json",
-                     "User-Agent": "errand-agent/0.1"}, method="POST")
+            headers=self._headers(), method="POST")
         last = ""
         for attempt in range(self.max_retries + 1):
             try:
@@ -133,6 +169,8 @@ class OpenAICompatModel(Model):
                 last = f"HTTP {e.code}: {body}"
                 if e.code in (401, 403):
                     raise ModelConfigError(f"{self.provider} rejected the API key ({last})") from e
+                if e.code == 404 and "model" in body.lower():
+                    raise ModelNotFound(last) from e
                 if e.code == 429 or e.code >= 500:
                     wait = float(e.headers.get("retry-after") or 2 ** attempt)
                     time.sleep(min(wait, 20))
@@ -151,6 +189,15 @@ class OpenAICompatModel(Model):
                    "max_tokens": self.max_tokens, "temperature": self.temperature}
         try:
             data = self._post(payload)
+        except ModelNotFound as e:
+            alt = self.pick_available_model()
+            if not alt:
+                raise ModelConfigError(f"model '{self.name}' is not available to this key and no alternative "
+                                       f"was found ({e}). Set {PROVIDERS[self.provider]['model_env']} in .env; "
+                                       f"see: python -m errand_agent.check_llm --model {self.provider} --list") from e
+            print(f"[errand] model '{self.name}' is not available to this key; switching to '{alt}'")
+            self.name = alt
+            data = self._post(dict(payload, model=alt))
         except RuntimeError as e:
             if "tool_use_failed" not in str(e) and "failed to call a function" not in str(e).lower():
                 raise

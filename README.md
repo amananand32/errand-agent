@@ -34,7 +34,7 @@ The adapter (`errand_agent/llm/openai_compat.py`) speaks the OpenAI-compatible A
    under ₹1,500."* → reply **yes**. The default `timeout` preset makes the first booking time out after
    succeeding, so you can watch the recovery in the trace.
 
-Defaults: Groq `llama-3.3-70b-versatile`, Grok `grok-4-1-fast-non-reasoning`. Pick another model with
+Defaults: Groq `openai/gpt-oss-120b`, Grok `grok-4-1-fast-non-reasoning`. If your key cannot use the configured model, the adapter lists the models your key can use and switches to a tool-capable one automatically (`check_llm --list` shows them). Pick another model with
 `--model groq:<model-id>` / `--model grok:<model-id>` or `GROQ_MODEL` / `GROK_MODEL` in `.env`. Any other
 OpenAI-compatible endpoint: `--model openai-compat` with `ERRAND_BASE_URL`, `ERRAND_API_KEY`, `ERRAND_MODEL`.
 Claude: `pip install anthropic`, set `ANTHROPIC_API_KEY`, use `--model anthropic`.

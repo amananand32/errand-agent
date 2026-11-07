@@ -106,3 +106,15 @@ errand_agent.check_llm`, friendly errors for missing/invalid keys, honest cost (
 prices reported as null instead of guessed), and an evidence-rejection message that tells the model what
 to quote. Tests: conversion round trip, missing-key error, and a full booking turn through the adapter
 with stubbed HTTP (64 passing). Could not call Groq/xAI from the sandbox (egress blocked).
+
+---
+
+### Human
+> Call failed: HTTP 404: {"error":{"message":"The model `llama-3.3-70b-versatile` does not exist or you do not have access to it.","type":"invalid_request_error","code":"model_not_found"}}
+
+### Assistant
+Checked Groq's docs: the model is still listed, so the key most likely lacks access to it. Changed the
+Groq default to `openai/gpt-oss-120b` and, instead of trusting any hardcoded id, made the adapter handle
+`model_not_found` by calling `GET /models` and switching to the first tool-capable model the key can use
+(printing which). `check_llm --list` prints the available ids. Raised `max_tokens` to 2048 for reasoning
+models. Added two regression tests (fallback succeeds; clear error when nothing usable). 66 passing.
