@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -84,6 +85,20 @@ def from_openai_message(msg: dict) -> list[dict]:
     return blocks
 
 
+def _ssl_context() -> ssl.SSLContext:
+    """Use certifi's CA bundle when available (python.org builds on macOS often lack system CAs)."""
+    try:
+        import certifi  # type: ignore
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
+SSL_HELP = ("Python could not verify HTTPS certificates. On macOS run "
+            "'/Applications/Python 3.x/Install Certificates.command' (python.org installs) "
+            "or 'python3 -m pip install certifi', then try again.")
+
+
 class OpenAICompatModel(Model):
     def __init__(self, provider: str = "groq", model: str | None = None, base_url: str | None = None,
                  api_key: str | None = None, max_tokens: int = 1024, temperature: float = 0.0,
@@ -111,7 +126,7 @@ class OpenAICompatModel(Model):
         last = ""
         for attempt in range(self.max_retries + 1):
             try:
-                with urllib.request.urlopen(req, timeout=self.timeout_s) as r:
+                with urllib.request.urlopen(req, timeout=self.timeout_s, context=_ssl_context()) as r:
                     return json.loads(r.read())
             except urllib.error.HTTPError as e:
                 body = e.read().decode(errors="replace")[:600]
@@ -124,6 +139,8 @@ class OpenAICompatModel(Model):
                     continue
                 raise RuntimeError(last) from e   # 400 etc: the agent loop will retry/handle
             except (urllib.error.URLError, TimeoutError) as e:
+                if isinstance(getattr(e, "reason", None), ssl.SSLCertVerificationError):
+                    raise ModelConfigError(SSL_HELP) from e
                 last = f"network error: {e}"
                 time.sleep(min(2 ** attempt, 10))
         raise RuntimeError(f"{self.provider} unavailable after retries: {last}")

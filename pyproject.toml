@@ -2,7 +2,7 @@
 name = "errand-agent"
 version = "0.1.0"
 description = "Chat agent for home-service errands with code-enforced approvals, idempotent booking and traced evals"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 dependencies = []
 
 [project.optional-dependencies]

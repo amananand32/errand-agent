@@ -12,7 +12,8 @@ python -m errand_agent.web --reset        # demo UI: chat | live trace  ->  http
 python -m errand_agent.cli --reset --show-trace
 ```
 
-No runtime dependencies (Python ≥ 3.10, stdlib + SQLite). `pytest` for tests.
+No runtime dependencies (Python ≥ 3.9, stdlib + SQLite). `pytest` for tests.
+On macOS/Linux the command is usually `python3` (use it everywhere below instead of `python`).
 
 ## Run it with a real LLM (Groq free, or xAI Grok)
 
