@@ -1,0 +1,3 @@
+pytest>=7
+# optional: real LLM
+# anthropic>=0.40

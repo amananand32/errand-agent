@@ -20,7 +20,7 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8"><title>Errand Agent 
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 ui-sans-serif,system-ui,Segoe UI,Roboto}
 header{display:flex;gap:12px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line)}
 header b{color:var(--acc)}header .sp{flex:1}button{background:#232837;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer}
-main{display:grid;grid-template-columns:1fr 1fr;height:calc(100vh - 50px)}
+main{display:grid;grid-template-columns:1fr 1fr;height:calc(100vh - 50px);overflow:hidden}main>section{min-height:0}
 #chat,#trace{overflow:auto;padding:14px}#chat{border-right:1px solid var(--line)}
 .m{max-width:92%;margin:8px 0;padding:10px 12px;border-radius:10px;white-space:pre-wrap}
 .u{background:#1e3a8a;margin-left:auto}.a{background:var(--panel);border:1px solid var(--line)}.n{background:#3b2a0a;border:1px solid #6b4f12}
@@ -36,13 +36,13 @@ input{flex:1;background:var(--panel);color:var(--ink);border:1px solid var(--lin
 <header><b>Errand</b><span id="meta"></span><span class="sp"></span>
 <button onclick="admin('tick')">Run monitor</button><button onclick="cancelProv()">Provider cancels…</button>
 <button onclick="admin('advance',{minutes:11})">+11 min</button></header>
-<main><section style="display:flex;flex-direction:column"><div id="chat" style="flex:1"></div>
+<main><section style="display:flex;flex-direction:column;min-height:0"><div id="chat" style="flex:1;min-height:0"></div>
 <form onsubmit="send(event)"><input id="q" autocomplete="off" placeholder="e.g. Find a plumber for my kitchen tap this week, mornings only, under ₹1,500."><button>Send</button></form></section>
 <section id="trace"></section></main>
 <script>
 const chat=document.getElementById('chat'),trace=document.getElementById('trace');
 function esc(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
-function add(cls,t){const d=document.createElement('div');d.className='m '+cls;d.innerHTML=esc(t).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');chat.appendChild(d);chat.scrollTop=1e9}
+function add(cls,t){const d=document.createElement('div');d.className='m '+cls;d.innerHTML=esc(t).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/_\((.+?)\)_/g,'<i style="color:var(--mute)">($1)</i>').replace(/`([^`]+)`/g,'<code style="color:var(--mute)">$1</code>');chat.appendChild(d);chat.scrollTop=1e9}
 function fmt(e){const k=Object.assign({},e);['seq','run_id','ts','type','tb'].forEach(x=>delete k[x]);
  if(e.type==='tool_call')return `${e.t_ms}ms  tool ${e.tool}(${JSON.stringify(e.args)})  ${e.error?'ERROR '+e.error:'-> '+JSON.stringify(e.result).slice(0,160)}  [${e.latency_ms}ms]`;
  if(e.type==='model_call')return `${e.t_ms}ms  model ${e.model} in=${e.tokens_in} out=${e.tokens_out} $${e.est_cost_usd} -> ${e.tool_uses.join(',')||'final text'}`;
