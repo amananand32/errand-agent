@@ -14,6 +14,9 @@ def pytest_sessionfinish(session, exitstatus):
     if not RESULTS:
         return
     os.makedirs(os.path.join(ROOT, "reports"), exist_ok=True)
+    from evals.scenarios import SCENARIOS
+    # a filtered run (pytest -k ...) must not overwrite the full table
+    stem = "eval_table" if len(RESULTS) == len(SCENARIOS) else "eval_table.partial"
     order = {r.scenario.id: i for i, r in enumerate(RESULTS)}
     rows = sorted(RESULTS, key=lambda r: r.scenario.id)
     md = ["# Eval table", "",
@@ -32,9 +35,9 @@ def pytest_sessionfinish(session, exitstatus):
                   f"{'✅ pass' if r.passed else '❌ FAIL'} | {esc(notes)} |")
     inv = sorted({c[0] for r in rows for c in r.checks if c[0].startswith("INV")})
     md += ["", "Global invariants checked in every scenario:", ""] + [f"- {i}" for i in inv]
-    with open(os.path.join(ROOT, "reports", "eval_table.md"), "w") as f:
+    with open(os.path.join(ROOT, "reports", f"{stem}.md"), "w") as f:
         f.write("\n".join(md) + "\n")
-    with open(os.path.join(ROOT, "reports", "eval_table.csv"), "w", newline="") as f:
+    with open(os.path.join(ROOT, "reports", f"{stem}.csv"), "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["scenario", "category", "expected", "actual", "pass_fail", "checks"])
         for r in rows:

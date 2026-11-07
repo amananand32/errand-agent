@@ -6,3 +6,4 @@ reports/runs/
 *.db
 *.db-wal
 *.db-shm
+reports/eval_table.partial.*

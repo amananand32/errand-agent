@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import uuid
 from typing import Any
 
 from .clock import Clock
@@ -60,7 +59,9 @@ class Tracer:
         return os.path.join(self.trace_dir, f"{self.run_id}.jsonl")
 
     def start_run(self, session_id: str, kind: str, **data: Any) -> str:
-        self.run_id = f"run-{self.clock.now().strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:6]}"
+        # deterministic + unique per trace dir (one file per run), so committed traces are reproducible
+        n = len([f for f in os.listdir(self.trace_dir) if f.endswith(".jsonl")])
+        self.run_id = f"run-{self.clock.now().strftime('%Y%m%dT%H%M%S')}-{n:04d}"
         self.all_runs.append(self.run_id)
         self.events = []
         self._t0 = self.clock.monotonic()
