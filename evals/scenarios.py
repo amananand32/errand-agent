@@ -4,7 +4,6 @@ never exact reply wording. Global invariants are added by the harness."""
 from __future__ import annotations
 
 import json
-import shutil
 from datetime import date, datetime
 
 from errand_agent.executor import SimulatedCrash
@@ -181,8 +180,9 @@ def s_timeout_after_success(env: Env):
     v = r2.data["verified"][0] if r2.data["verified"] else {}
     calls = env.tool_calls("book")
     status = env.tool_calls("get_booking_status")
-    trace_src = env.agent.tracer.path
-    shutil.copy(trace_src, f"{ROOT}/traces/timeout_after_success.jsonl")
+    with open(f"{ROOT}/traces/timeout_after_success.jsonl", "w") as f:   # both runs: request + confirm
+        for e in env.events:
+            f.write(json.dumps(e, default=str, ensure_ascii=False) + "\n")
     return [
         C("outcome booked, verified via get_booking_status", r2.outcome == "booked"
           and v.get("verified_by") == "get_booking_status"),

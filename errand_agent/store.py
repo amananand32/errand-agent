@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE TABLE IF NOT EXISTS outbox (
   id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, kind TEXT, text TEXT, ts TEXT,
   delivered INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS provider_flags (
+  provider_id TEXT PRIMARY KEY, reason TEXT, ts TEXT);
 CREATE TABLE IF NOT EXISTS known_bookings (
   booking_id TEXT PRIMARY KEY, user_id TEXT, data TEXT, status TEXT, handled TEXT);
 """
@@ -37,7 +39,8 @@ CREATE TABLE IF NOT EXISTS known_bookings (
 class Store:
     def __init__(self, path: str):
         self.path = path
-        self.db = sqlite3.connect(path, isolation_level=None)  # autocommit: every write is durable
+        # autocommit: every write is durable. check_same_thread=False: the web demo serialises access with a lock.
+        self.db = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)

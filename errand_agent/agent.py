@@ -512,7 +512,11 @@ class Agent:
                 continue
             out.append({"provider_id": p["provider_id"], "name": p["name"], "price": p["price"],
                         "rating": p["rating"], "fitting_slots": fitting})
-        out.sort(key=lambda c: (-c["rating"], c["price"]))
+        flagged = {r["provider_id"] for r in self.store.q("SELECT provider_id FROM provider_flags")}
+        for c in out:
+            c["review_flagged"] = c["provider_id"] in flagged
+        # previously-flagged providers (suspicious reviews) sink to the bottom; otherwise rating, then price
+        out.sort(key=lambda c: (c["review_flagged"], -c["rating"], c["price"]))
         return out[:5], ", ".join(f"{v} {k.replace('_', ' ')}" for k, v in reasons.items() if v)
 
     def _t_search_providers(self, inp: dict, user_text: str):
@@ -549,6 +553,8 @@ class Agent:
         clean, flags = sanitize_tool_result(res)
         if flags:
             self.tracer.event("injection_flagged", tool="get_provider", provider_id=inp["provider_id"], paths=flags)
+            self.store.x("INSERT OR REPLACE INTO provider_flags VALUES(?,?,?)", inp["provider_id"],
+                         "review contains instructions aimed at AI agents", self._ts())
             for c in self.wf.candidates:
                 if c["provider_id"] == inp["provider_id"]:
                     c["review_flagged"] = True
