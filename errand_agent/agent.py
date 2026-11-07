@@ -145,10 +145,14 @@ class Agent:
         except LimitExceeded as e:
             self.tracer.event("limit_exceeded", which=e.which, detail=str(e))
             reply, outcome = self._limit_reply(e), "limit_exceeded"
-        except Exception as e:  # noqa: BLE001 - every exit path must produce a user-facing outcome
-            self.tracer.event("error", error=f"{type(e).__name__}: {e}", tb=traceback.format_exc()[-1500:])
-            reply, outcome = ("Sorry - something went wrong on my side. I haven't booked or changed anything "
-                              "beyond what I've confirmed above. Please try again."), "error"
+        except Exception as e:  # noqa: BLE001
+            if type(e).__name__ != "ModelConfigError":
+                self.tracer.event("error", error=f"{type(e).__name__}: {e}", tb=traceback.format_exc()[-1500:])
+                reply, outcome = ("Sorry - something went wrong on my side. I haven't booked or changed anything "
+                                  "beyond what I've confirmed above. Please try again."), "error"
+            else:
+                self.tracer.event("error", error=str(e))
+                reply, outcome = f"The language model isn't configured: {e}", "model_config_error"
         reply_user, reply_hist = self._compose(reply)
         self._save()
         self.store.add_message(self.session_id, self.user_id, "assistant", reply_hist, self._ts())
@@ -337,6 +341,8 @@ class Agent:
             try:
                 resp = self.model.complete(pkt.system, pkt.messages, MODEL_TOOLS)
             except Exception as e:  # noqa: BLE001
+                if type(e).__name__ == "ModelConfigError":
+                    raise   # bad key / model id: retrying won't help
                 last = e
                 self.tracer.event("model_error", attempt=attempt, error=f"{type(e).__name__}: {e}")
                 self.clock.sleep(self.limits.backoff_base_s * 2 ** (attempt - 1))
@@ -384,8 +390,9 @@ class Agent:
             self.tracer.event("blocked_request_change", fields={k: v for k, v in inp.items() if k != "evidence"},
                               evidence=sanitize_for_trace(inp.get("evidence", "")),
                               reason="evidence is not a quote of the user's message")
-            return {"error": "rejected: request details can only come from the user's own words; evidence "
-                             "was not found in the user's latest message"}, True
+            return {"error": "rejected: request details can only come from the user's own words; `evidence` "
+                             "must be copied verbatim from the user's latest message, which is: "
+                             + json.dumps(user_text[:300], ensure_ascii=False)}, True
         wf = self.wf
         intent = inp.get("intent")
         # A different intent, or any new request after a completed task, starts a fresh request.

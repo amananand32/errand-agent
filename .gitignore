@@ -7,3 +7,4 @@ reports/runs/
 *.db-wal
 *.db-shm
 reports/eval_table.partial.*
+.env

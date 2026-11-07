@@ -7,15 +7,39 @@ preferences with provenance, follows up proactively when a provider cancels — 
 Everything runs locally against mock providers; there are no real payments or external services.
 
 ```
-python -m pytest                          # 61 tests incl. 34 eval scenarios -> reports/eval_table.md
+python -m pytest                          # 64 tests incl. 34 eval scenarios -> reports/eval_table.md
 python -m errand_agent.web --reset        # demo UI: chat | live trace  ->  http://localhost:8765
 python -m errand_agent.cli --reset --show-trace
 ```
 
 No runtime dependencies (Python ≥ 3.10, stdlib + SQLite). `pytest` for tests.
-Real LLM: `pip install anthropic && export ANTHROPIC_API_KEY=...` then add `--model anthropic`
-(default `claude-sonnet-5-5`, override with `ERRAND_MODEL`). Add `--record data/cassette.jsonl` to record
-model calls for strict offline replay.
+
+## Run it with a real LLM (Groq free, or xAI Grok)
+
+The adapter (`errand_agent/llm/openai_compat.py`) speaks the OpenAI-compatible API, so no SDK is needed.
+
+1. Get a key — **Groq** is free with no card: <https://console.groq.com/keys>. **xAI Grok** is paid:
+   <https://console.x.ai>.
+2. Copy `.env.example` to `.env` in the repo folder and paste the key (`GROQ_API_KEY=...` or `XAI_API_KEY=...`).
+3. Check the key and tool calling:
+   ```
+   python -m errand_agent.check_llm --model groq      # or --model grok
+   ```
+4. Run the demo (chat on the left, live trace on the right):
+   ```
+   python -m errand_agent.web --model groq --reset    # or --model grok
+   ```
+   then open <http://localhost:8765> and try *"Find a plumber for my kitchen tap this week, mornings only,
+   under ₹1,500."* → reply **yes**. The default `timeout` preset makes the first booking time out after
+   succeeding, so you can watch the recovery in the trace.
+
+Defaults: Groq `llama-3.3-70b-versatile`, Grok `grok-4-1-fast-non-reasoning`. Pick another model with
+`--model groq:<model-id>` / `--model grok:<model-id>` or `GROQ_MODEL` / `GROK_MODEL` in `.env`. Any other
+OpenAI-compatible endpoint: `--model openai-compat` with `ERRAND_BASE_URL`, `ERRAND_API_KEY`, `ERRAND_MODEL`.
+Claude: `pip install anthropic`, set `ANTHROPIC_API_KEY`, use `--model anthropic`.
+Add `--record data/cassette.jsonl` to record model calls for strict offline replay.
+
+The automated tests never call an API — they use the offline scripted model, so `pytest` works without a key.
 
 ## Deliverables
 
@@ -106,10 +130,13 @@ traces/            committed sample trace
 
 ## Honest limitations
 
-* The real-LLM path (`AnthropicModel`) is implemented and unit-tested against a stubbed SDK, but this
-  build environment had no API access, so no live Claude run or real-model cassette is included. The
-  committed demo video therefore shows the offline model; `docs/DEMO.md` is the script for recording
-  the Loom with `--model anthropic`.
+* The real-LLM adapters (Groq/Grok via `OpenAICompatModel`, Claude via `AnthropicModel`) are unit-tested
+  against stubbed HTTP/SDK responses, including a full booking turn, but this build environment had no
+  access to those APIs, so no live run or real-model cassette is included. The committed demo video
+  shows the offline model; `docs/DEMO.md` is the script for recording the Loom with `--model groq`.
+* Smaller open models (e.g. Llama on Groq) sometimes paraphrase instead of quoting the user for
+  `evidence`; the app then rejects the change and tells the model the exact message to quote, so it
+  usually corrects itself on the next step. Safety does not depend on the model getting this right.
 * Token counts for the offline model are estimates (chars/4); real runs log the API's usage numbers.
   The context budget covers system + messages; tool schemas (~900 tokens) are a fixed extra.
 * Forget-scrubbing is token based (value, original statement, proper nouns); a paraphrase with no

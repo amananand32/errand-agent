@@ -112,7 +112,7 @@ def serve(port: int, agent) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="rule")
+    ap.add_argument("--model", default="rule", help="rule | groq | grok | groq:<id> | grok:<id> | anthropic")
     ap.add_argument("--preset", default="timeout", choices=sorted(PRESETS))
     ap.add_argument("--data", default="data")
     ap.add_argument("--port", type=int, default=8765)
@@ -120,7 +120,11 @@ def main() -> None:
     ap.add_argument("--record")
     ap.add_argument("--real-clock", action="store_true")
     a = ap.parse_args()
-    serve(a.port, build(a.data, a.model, a.preset, a.reset, a.record, a.real_clock))
+    try:
+        agent = build(a.data, a.model, a.preset, a.reset, a.record, a.real_clock)
+    except Exception as e:  # noqa: BLE001
+        raise SystemExit(f"Could not start the model '{a.model}': {e}")
+    serve(a.port, agent)
 
 
 if __name__ == "__main__":

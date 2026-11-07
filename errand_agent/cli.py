@@ -30,7 +30,7 @@ def short(e: dict) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="rule", help="rule | anthropic | <claude model id>")
+    ap.add_argument("--model", default="rule", help="rule | groq | grok | groq:<id> | grok:<id> | anthropic")
     ap.add_argument("--preset", default="timeout", choices=sorted(PRESETS))
     ap.add_argument("--data", default="data")
     ap.add_argument("--reset", action="store_true")
@@ -38,7 +38,10 @@ def main() -> None:
     ap.add_argument("--real-clock", action="store_true")
     ap.add_argument("--show-trace", action="store_true", help="print a compact trace after each turn")
     a = ap.parse_args()
-    agent = build(a.data, a.model, a.preset, a.reset, a.record, a.real_clock)
+    try:
+        agent = build(a.data, a.model, a.preset, a.reset, a.record, a.real_clock)
+    except Exception as e:  # noqa: BLE001
+        raise SystemExit(f"Could not start the model '{a.model}': {e}")
     print(f"Errand agent ({a.model}, preset={a.preset}). Today is {agent.clock.now():%a %d %b %Y %H:%M}. "
           "Type /quit to exit.")
     for n in agent.notices:

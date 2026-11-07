@@ -15,14 +15,28 @@ PRICING = {
     "claude-haiku-5-5": (0.10, 0.50),
     "claude-opus-5-5": (4.00, 20.00),
 }
+# Groq free tier: no charge (rate-limited). Override any price with ERRAND_PRICE_IN / ERRAND_PRICE_OUT.
+FREE_MODELS = {"llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen3-32b", "kimi-k2-instruct",
+               "llama-4-scout-17b-16e-instruct", "llama-4-maverick-17b-128e-instruct"}
 # Offline/scripted runs report cost *as if* the default model had been used.
 COST_REFERENCE_MODEL = "claude-sonnet-5-5"
+OFFLINE_MODELS = {"rule-model-v1", "replay"}
 
 _PHONE = re.compile(r"(?<!\d)(\+?91[\s-]?)?[6-9]\d{9}(?!\d)")
 
 
-def estimate_cost(model: str, tokens_in: int, tokens_out: int) -> float:
-    pin, pout = PRICING.get(model, PRICING[COST_REFERENCE_MODEL])
+def estimate_cost(model: str, tokens_in: int, tokens_out: int) -> float | None:
+    """USD estimate, or None when the price is unknown (we don't guess)."""
+    if os.environ.get("ERRAND_PRICE_IN") and os.environ.get("ERRAND_PRICE_OUT"):
+        pin, pout = float(os.environ["ERRAND_PRICE_IN"]), float(os.environ["ERRAND_PRICE_OUT"])
+    elif model in PRICING:
+        pin, pout = PRICING[model]
+    elif model in FREE_MODELS:
+        return 0.0
+    elif model in OFFLINE_MODELS:
+        pin, pout = PRICING[COST_REFERENCE_MODEL]
+    else:
+        return None
     return round(tokens_in / 1e6 * pin + tokens_out / 1e6 * pout, 6)
 
 
@@ -90,7 +104,8 @@ class Tracer:
         self.totals["model_calls"] += 1
         self.totals["tokens_in"] += tokens_in
         self.totals["tokens_out"] += tokens_out
-        self.totals["cost_usd"] = round(self.totals["cost_usd"] + cost, 6)
+        if cost is not None:
+            self.totals["cost_usd"] = round(self.totals["cost_usd"] + cost, 6)
         self.event("model_call", model=model, latency_ms=round(latency_ms, 1), tokens_in=tokens_in,
                    tokens_out=tokens_out, est_cost_usd=cost, stop_reason=stop_reason,
                    tool_uses=tool_uses, token_counts_estimated=estimated)

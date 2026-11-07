@@ -90,3 +90,19 @@ Commit: *34 eval scenarios … fix 3 real bugs with regression tests*
 ### Not done in this session (and why)
 * No live Claude calls: no API key/network in the build sandbox. The Anthropic adapter is unit-tested
   with a stubbed SDK; `docs/DEMO.md` explains recording the Loom with `--model anthropic --record`.
+
+---
+
+### Human
+> just edit it with free grok api so that i can run it and test it
+
+### Assistant
+Looked up current providers: xAI Grok lists no free tier (cheapest `grok-4-1-fast-non-reasoning`);
+Groq (`api.groq.com/openai/v1`) has a free key with no card. Both are OpenAI-compatible, so added one
+stdlib adapter, `llm/openai_compat.py` (`--model groq` / `--model grok`), converting the agent's
+Anthropic-style blocks to OpenAI `tool_calls`/`tool` messages and back; 429/5xx retry with backoff;
+one retry on malformed tool calls. Added `.env` loading + `.env.example`, `python -m
+errand_agent.check_llm`, friendly errors for missing/invalid keys, honest cost (Groq free = $0, unknown
+prices reported as null instead of guessed), and an evidence-rejection message that tells the model what
+to quote. Tests: conversion round trip, missing-key error, and a full booking turn through the adapter
+with stubbed HTTP (64 passing). Could not call Groq/xAI from the sandbox (egress blocked).

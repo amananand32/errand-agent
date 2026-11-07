@@ -20,9 +20,27 @@ PRESETS = {
 }
 
 
+def load_dotenv(path: str = ".env") -> None:
+    """Minimal .env loader (KEY=value lines); real environment variables win."""
+    if not os.path.exists(path):
+        return
+    for line in open(path, encoding="utf-8"):
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+
 def make_model(name: str, record_to: str | None = None) -> Model:
+    """rule | grok | groq | openai-compat | anthropic | <claude model id>.
+    `grok:<model-id>` / `groq:<model-id>` pick a specific model."""
+    load_dotenv()
+    provider, _, model_id = name.partition(":")
     if name == "rule":
         m: Model = RuleModel()
+    elif provider in ("grok", "xai", "groq", "openai-compat"):
+        from .llm.openai_compat import OpenAICompatModel
+        m = OpenAICompatModel("grok" if provider == "xai" else provider, model=model_id or None)
     elif name in ("anthropic", "claude"):
         m = AnthropicModel(os.environ.get("ERRAND_MODEL", DEFAULT_MODEL))
     else:

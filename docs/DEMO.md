@@ -1,11 +1,12 @@
 # Demo script (3–5 min, chat and trace side by side)
 
 `docs/demo/errand_demo.mp4` is a real screen recording of this UI driven by `scripts/record_demo.py`
-(headless Chrome, offline model). To record the Loom with a live Claude model:
+(headless Chrome, offline model). To record the Loom with a live model (Groq is free; put
+`GROQ_API_KEY=...` in `.env`, or use `XAI_API_KEY` with `--model grok`):
 
 ```bash
-pip install anthropic && export ANTHROPIC_API_KEY=...
-python -m errand_agent.web --model anthropic --preset timeout --reset --record data/cassette.jsonl
+python -m errand_agent.check_llm --model groq
+python -m errand_agent.web --model groq --preset timeout --reset --record data/cassette.jsonl
 # open http://localhost:8765, start the screen recorder on the browser window
 ```
 
