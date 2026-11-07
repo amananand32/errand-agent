@@ -32,7 +32,7 @@ def _fmt(slot: str) -> str:
 
 def parse_state(system: str) -> dict:
     """The system prompt itself mentions '<state>' in prose, so anchor on the JSON payload.
-    (Regression: BUG-1 - a lazy '<state>(.*?)</state>' match started at the prose mention.)"""
+    (Regression, see docs/DEVLOG.md: a lazy '<state>(.*?)</state>' match started at the prose mention.)"""
     m = re.search(r"<state>(\{.*?\})</state>", system, re.S)
     if not m:
         raise ValueError("no <state>{...}</state> block in system prompt")

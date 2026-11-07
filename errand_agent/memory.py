@@ -14,6 +14,9 @@ from dataclasses import dataclass
 
 from .store import Store
 
+_STOP = {"the", "and", "for", "with", "keep", "please", "friendly", "named", "visitor", "visitors", "parking",
+         "basement", "gate", "closed", "ask", "them", "have", "has", "our", "your", "dog", "cat", "flat",
+         "main", "road", "near", "never", "always", "before", "after", "budget", "under", "prefer", "remember"}
 CORE_KEYS = {"area.preferred", "time.earliest", "time.latest", "language"}
 KEY_RE = re.compile(r"^[a-z_]+(\.[a-z_]+)*$")
 
@@ -125,11 +128,28 @@ class MemoryStore:
                      "forgotten", "", ts, ts)
         return values
 
+    @staticmethod
+    def distinctive_tokens(text: str) -> set[str]:
+        """Proper nouns / identifiers inside a forgotten value (e.g. a pet's name, a building).
+        Exact-string scrubbing alone missed paraphrases such as "I'll mention Bruno to
+        technicians" (BUG-2 in BUGS.md)."""
+        toks = set()
+        for i, w in enumerate(re.findall(r"[A-Za-z][\w-]{2,}|\d+[A-Za-z]?", text)):
+            if w.lower() in _STOP:
+                continue
+            if w[0].isupper() or any(ch.isdigit() for ch in w):
+                toks.add(w)
+        return toks
+
     def scrub_history(self, user_id: str, values: list[str]) -> None:
+        targets = set(values)
         for v in values:
+            targets |= self.distinctive_tokens(v)
+        for v in sorted(targets, key=len, reverse=True):
             if len(v) < 3:
                 continue
-            pat = re.compile(re.escape(v), re.IGNORECASE)
+            pat = re.compile(r"\b" + re.escape(v) + r"\b" if v[0].isalnum() and v[-1].isalnum()
+                             else re.escape(v), re.IGNORECASE)
             for r in self.s.q("SELECT id, text FROM messages WHERE user_id=?", user_id):
                 if pat.search(r["text"]):
                     self.s.x("UPDATE messages SET text=? WHERE id=?", pat.sub("[forgotten]", r["text"]), r["id"])

@@ -131,13 +131,20 @@ class ContextBuilder:
             hist_msgs.insert(0, msg)
             hist_ids.insert(0, row["id"])
             remaining -= t
-        dropped = len(history) - len(hist_msgs)
-        summary = (f"<earlier_conversation>{dropped} older messages omitted to fit the context budget. "
-                   f"Rely on <memories> and <state>, not on assumptions about them.</earlier_conversation>"
-                   if dropped else "")
-        system = "\n\n".join(x for x in (base, state_txt, mem_txt, summary) if x)
-        messages = self._alternate(hist_msgs + [cur_msg]) + scratch
-        total = est_tokens(system) + est_tokens(messages)
+        # Measure the *actual* payload and trim oldest history until it fits. Per-section estimates
+        # ignored the JSON envelope + summary line and overshot the cap (BUG noted in DEVLOG).
+        while True:
+            dropped = len(history) - len(hist_msgs)
+            summary = (f"<earlier_conversation>{dropped} older messages omitted to fit the context budget. "
+                       f"Rely on <memories> and <state>, not on assumptions about them.</earlier_conversation>"
+                       if dropped else "")
+            system = "\n\n".join(x for x in (base, state_txt, mem_txt, summary) if x)
+            messages = self._alternate(hist_msgs + [cur_msg]) + scratch
+            total = est_tokens(system) + est_tokens(messages)
+            if total <= self.budget or not hist_msgs:
+                break
+            hist_msgs.pop(0)
+            hist_ids.pop(0)
         manifest["sections"].update(history=est_tokens(hist_msgs), summary=est_tokens(summary))
         manifest.update(
             tokens_total=total,

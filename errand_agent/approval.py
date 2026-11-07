@@ -54,7 +54,8 @@ def classify_reply(text: str, ref: str | None = None) -> str:
     rest = [w for w in words if w not in codes]
     if any(w in NEGATE for w in rest):
         only_neg = all(w in NEGATE or w in FILLER or w in {"thanks", "leave"} for w in rest)
-        return "reject" if only_neg else "other"
+        short_no = len(rest) <= 5 and not any(w in AFFIRM for w in rest)
+        return "reject" if (only_neg or short_no) else "other"
     if any(w in AFFIRM for w in rest) and all(w in AFFIRM or w in FILLER for w in rest):
         return "approve"
     return "other"
@@ -140,8 +141,10 @@ class ApprovalGate:
         self._ev("approval_rejected", proposal_id=pid, reason=reason)
 
     def invalidate(self, pid: str, reason: str) -> None:
+        # 'executing' must be included: after a crash the proposal is left 'executing' and its
+        # approval must not survive (BUG-3 in BUGS.md).
         self.s.x("UPDATE proposals SET status='invalidated', reason=? WHERE id=? AND status IN "
-                 "('pending','approved')", reason, pid)
+                 "('pending','approved','executing')", reason, pid)
         self.s.x("UPDATE approvals SET consumed=1 WHERE proposal_id=?", pid)
         self._ev("approval_invalidated", proposal_id=pid, reason=reason)
 

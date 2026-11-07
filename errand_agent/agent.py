@@ -76,6 +76,7 @@ class Agent:
         self.wf = Workflow.from_dict(d) if d else Workflow(session_id, user_id)
         self.context_log: list[ContextPacket] = []   # in-memory copy for tests / debugging
         self.notices: list[str] = []
+        self._carry_verified: list[Outcome] = []
         self._startup_recovery()
 
     # ------------------------------------------------------------------ util
@@ -89,22 +90,30 @@ class Agent:
         if self.wf.phase != phase:
             self.wf.transition(phase, reason, self.tracer)
 
-    def _startup_recovery(self) -> None:
-        rows = self.store.q("SELECT idem_key FROM intents WHERE session_id=? AND status IN ('in_flight','unknown')",
-                            self.session_id)
-        if not rows:
-            return
-        self.tracer.start_run(self.session_id, "startup_recovery", in_flight=[r["idem_key"] for r in rows])
-        self.tools.budget = Budget(self.limits, self.clock)
+    def _unresolved_intents(self) -> list:
+        return self.store.q("SELECT idem_key FROM intents WHERE session_id=? AND kind='book' AND status IN "
+                            "('in_flight','unknown')", self.session_id)
+
+    def _reconcile(self) -> str | None:
+        """Resolve ambiguous bookings against the source of truth. Returns a user notice."""
         msgs = []
         try:
             for out in self.executor.recover(self.wf):
                 msgs.append(self._render_outcome(out))
-                if out.code == "booked":
+                if out.success:
+                    self._carry_verified.append(out)
                     self.wf.pending_proposal_id = None
         except LimitExceeded as e:
             msgs.append(f"I couldn't finish verifying an earlier booking ({e.which}); it is NOT confirmed yet.")
-        text = "Update on your earlier request: " + " ".join(msgs)
+        return ("Update on your earlier booking: " + " ".join(msgs)) if msgs else None
+
+    def _startup_recovery(self) -> None:
+        rows = self._unresolved_intents()
+        if not rows:
+            return
+        self.tracer.start_run(self.session_id, "startup_recovery", in_flight=[r["idem_key"] for r in rows])
+        self.tools.budget = Budget(self.limits, self.clock)
+        text = self._reconcile() or ""
         self.notices.append(text)
         self.store.push_outbox(self.user_id, "recovery", text, self._ts())
         self._save()
@@ -119,10 +128,17 @@ class Agent:
         budget = Budget(self.limits, self.clock)
         self.tools.budget = budget
         self.store.add_message(self.session_id, self.user_id, "user", text, self._ts())
-        self._verified: list[Outcome] = []
+        self._verified: list[Outcome] = list(self._carry_verified)
+        self._carry_verified = []
         self._direct: list[str] = []        # app-rendered blocks shown to user, redacted in history
         self._flags: set[str] = set()
         try:
+            if self._unresolved_intents():   # an earlier booking is still ambiguous: resolve it first
+                note = self._reconcile()
+                if note:
+                    self.notices.append(note)
+                self._verified += self._carry_verified
+                self._carry_verified = []
             reply, outcome = self._handle(text, budget)
         except SimulatedCrash:
             raise  # emulate the process dying: nothing after this point runs
@@ -257,7 +273,7 @@ class Agent:
 
     def _propose_alternative(self, failed: Proposal) -> str:
         bad = (failed.material["provider_id"], failed.material["slot"])
-        for c in self.wf.candidates:
+        for c in sorted(self.wf.candidates, key=lambda c: bool(c.get("review_flagged"))):
             for s in c.get("fitting_slots", []):
                 if (c["provider_id"], s) == bad:
                     continue
@@ -370,7 +386,7 @@ class Agent:
                               reason="evidence is not a quote of the user's message")
             return {"error": "rejected: request details can only come from the user's own words; evidence "
                              "was not found in the user's latest message"}, True
-        wf, r = self.wf, self.wf.request
+        wf = self.wf
         intent = inp.get("intent")
         # A different intent, or any new request after a completed task, starts a fresh request.
         # Corrections within an active task (incl. after a failure/rejection) keep all other fields.
@@ -380,6 +396,8 @@ class Agent:
             wf.reset_for_new_task(self.tracer)
         if intent:
             wf.intent = intent
+        # Bind AFTER a possible reset: reset_for_new_task replaces wf.request (BUG-1 in BUGS.md).
+        r = wf.request
         changed = []
 
         def setf(k, v):
@@ -453,16 +471,19 @@ class Agent:
     def _apply_memory_defaults(self) -> dict:
         r = self.wf.request
         filled = {}
-        if self.wf.intent not in (None, "book"):
+        if self.wf.intent not in (None, "book", "reschedule"):
             return filled
-        for fld, key in (("area", "area.preferred"), ("earliest_time", "time.earliest")):
+        pairs = (("area", "area.preferred"), ("earliest_time", "time.earliest"))
+        if self.wf.intent == "reschedule":
+            pairs = (("earliest_time", "time.earliest"),)
+        for fld, key in pairs:
             if getattr(r, fld) is None:
                 m = self.memory.active(self.user_id, key)
                 if m and m.eligible:
                     setattr(r, fld, m.value)
                     r.sources[fld] = f"memory:{m.id}"
                     filled[fld] = m.value
-        if r.service and not r.budget_set:
+        if r.service and not r.budget_set and self.wf.intent != "reschedule":
             m = self.memory.active(self.user_id, f"budget.{r.service}")
             if m and m.eligible:
                 r.budget_max, r.budget_set = int(m.value), True
@@ -520,10 +541,17 @@ class Agent:
 
     def _t_get_provider(self, inp: dict, user_text: str):
         res = self.tools.call("get_provider", caller="model", provider_id=inp["provider_id"])
-        res = dict(res, available_slots=res.get("available_slots", [])[:12])
+        r = self.wf.request
+        slots = res.get("available_slots", [])
+        if r.date_from and r.date_to:   # keep what matters for this request before capping size
+            slots = [s for s in slots if r.date_from <= s[:10] <= r.date_to] or slots
+        res = dict(res, available_slots=slots[:12])
         clean, flags = sanitize_tool_result(res)
         if flags:
             self.tracer.event("injection_flagged", tool="get_provider", provider_id=inp["provider_id"], paths=flags)
+            for c in self.wf.candidates:
+                if c["provider_id"] == inp["provider_id"]:
+                    c["review_flagged"] = True
         return clean, False
 
     def _t_list_bookings(self, inp: dict, user_text: str):
