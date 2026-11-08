@@ -118,3 +118,17 @@ Groq default to `openai/gpt-oss-120b` and, instead of trusting any hardcoded id,
 `model_not_found` by calling `GET /models` and switching to the first tool-capable model the key can use
 (printing which). `check_llm --list` prints the available ids. Raised `max_tokens` to 2048 for reasoning
 models. Added two regression tests (fallback succeeds; clear error when nothing usable). 66 passing.
+
+---
+
+### Human
+> (pasted a live Groq run: the reply promised to tell the technician about the dog; trace showed a second
+> identical request replacing the proposal, `search_args_mismatch` on date_to, 0ms model latency, `$null` cost)
+
+### Assistant
+Diagnosed five issues from the trace and fixed them (see `docs/DEVLOG.md`, "First live run"): no promises of
+untooled actions; identical repeat keeps the pending card; precomputed date ranges in `<today>`; app-
+authoritative search arguments; real model latency that also advances the simulated clock. The test suite
+then caught a follow-on: compression destroyed search results under the 2,200-token test budget, so it now
+keeps valid JSON. Added `tests/test_live_issues.py` (7 tests). 74 passing. `$null` cost came from an older
+zip; the current one prices Groq free-tier models at $0.

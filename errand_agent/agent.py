@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -203,6 +204,10 @@ class Agent:
                     self.tracer.event("approval_refused", proposal_id=p.id, error=str(e))
                     return "Please check the details below once more and reply 'yes' to confirm.", "stale_approval"
                 return self._execute(self.gate.get(p.id))
+            if c == "other" and self._same_as_previous_user_message(text):
+                self.tracer.event("duplicate_request_kept_proposal", proposal_id=p.id)
+                return ("That's the same request as before, so I've kept the option I already found for you. "
+                        "Reply yes to confirm it, or tell me what to change."), "proposed"
             if c == "reject":
                 self.gate.reject(p.id)
                 self.wf.pending_proposal_id = None
@@ -223,6 +228,10 @@ class Agent:
                     return ("There's nothing waiting for your confirmation right now - the earlier proposal is no "
                             "longer valid. Tell me what you'd like and I'll set it up again."), "nothing_to_confirm"
         return self._llm_loop(text, budget)
+
+    def _same_as_previous_user_message(self, text: str) -> bool:
+        rows = [r for r in self.store.messages(self.user_id, limit=6) if r["role"] == "user"]
+        return len(rows) >= 2 and _norm(rows[-2]["text"]) == _norm(text)
 
     def _describe(self, p: Proposal) -> str:
         m = p.material
@@ -318,7 +327,7 @@ class Agent:
         final = ""
         while True:
             budget.charge_model_turn()
-            pkt = self.ctx.build(self.wf, self.clock.now().strftime("%Y-%m-%d %A %H:%M IST"), history, text, scratch)
+            pkt = self.ctx.build(self.wf, self._today_text(), history, text, scratch)
             self.context_log.append(pkt)
             self.tracer.event("context", **pkt.manifest)
             resp = self._call_model(pkt)
@@ -337,10 +346,24 @@ class Agent:
                    "asked" if self.wf.phase == Phase.GATHERING else "replied")
         return final, outcome
 
+    def _today_text(self) -> str:
+        """Today plus precomputed date ranges; open models get 'this week' wrong otherwise."""
+        from datetime import timedelta
+        now = self.clock.now()
+        d = now.date()
+        end_week = d + timedelta(days=6 - d.weekday())
+        nxt = end_week + timedelta(days=1)
+        sat = d + timedelta(days=(5 - d.weekday()) % 7)
+        days = ", ".join(f"{(d + timedelta(days=i)):%a}={(d + timedelta(days=i)).isoformat()}" for i in range(8))
+        return (f"{now:%Y-%m-%d %A %H:%M} IST. Use these exact dates: today={d.isoformat()}, "
+                f"tomorrow={(d + timedelta(days=1)).isoformat()}, this week={d.isoformat()}..{end_week.isoformat()}, "
+                f"next week={nxt.isoformat()}..{(nxt + timedelta(days=6)).isoformat()}, "
+                f"this weekend={sat.isoformat()}..{(sat + timedelta(days=1)).isoformat()}; next 8 days: {days}")
+
     def _call_model(self, pkt: ContextPacket):
         last = None
         for attempt in range(1, self.model_retries + 2):
-            t0 = self.clock.monotonic()
+            t0 = time.perf_counter()   # real wall time: the model call is real even under a FakeClock
             try:
                 resp = self.model.complete(pkt.system, pkt.messages, MODEL_TOOLS)
             except Exception as e:  # noqa: BLE001
@@ -350,7 +373,12 @@ class Agent:
                 self.tracer.event("model_error", attempt=attempt, error=f"{type(e).__name__}: {e}")
                 self.clock.sleep(self.limits.backoff_base_s * 2 ** (attempt - 1))
                 continue
-            self.tracer.model_call(resp.model, (self.clock.monotonic() - t0) * 1000, resp.tokens_in,
+            real_s = time.perf_counter() - t0
+            if hasattr(self.clock, "advance"):
+                # Simulated clock: account for real model latency so holds expire and the
+                # wall-clock limit applies as they would in production.
+                self.clock.advance(seconds=real_s)
+            self.tracer.model_call(resp.model, real_s * 1000, resp.tokens_in,
                                    resp.tokens_out, resp.stop_reason, [t["name"] for t in resp.tool_uses],
                                    resp.estimated)
             return resp
@@ -534,15 +562,19 @@ class Agent:
         r = self.wf.request
         if self.wf.intent in (None, "book") and r.missing():
             return {"error": f"request incomplete; ask the user for: {', '.join(r.missing())}"}, True
+        # The recorded request is authoritative: the search always uses it. Differences in the model's
+        # arguments are reported back instead of failing the step (seen live: the model recomputed
+        # "this week" with a different end date and then proposed from stale results).
         norm = {"service": catalog.normalize_service, "area": catalog.normalize_area}
+        ignored = {}
         for k in ("service", "area", "date_from", "date_to"):
             want = getattr(r, k)
             got = inp.get(k, "")
             got = (norm[k](got) or got) if k in norm else got
-            if want and str(got).lower() != str(want).lower():
-                self.tracer.event("search_args_mismatch", field=k, model_value=inp.get(k), request_value=want)
-                return {"error": f"search {k} must match the user's request ({want}); call update_request "
-                                 "first if the user changed it"}, True
+            if want and got and str(got).lower() != str(want).lower():
+                ignored[k] = {"model_value": inp.get(k), "used": want}
+        if ignored:
+            self.tracer.event("search_args_overridden", fields=ignored)
         res = self.tools.call("search_providers", caller="model", service=r.service, area=r.area,
                               date_range=[r.date_from, r.date_to])
         ranked, filtered = self.rank(res["providers"])
@@ -554,7 +586,12 @@ class Agent:
                                 "earliest_fitting_slot": c["fitting_slots"][0],
                                 "other_fitting_slots": c["fitting_slots"][1:3]} for i, c in enumerate(ranked)],
             "total_found": len(res["providers"]), "filtered_out_summary": filtered or "none",
-            "note": "Ranking and constraint filtering were done by the app from the user's request."})
+            "searched_with": {"service": r.service, "area": r.area, "date_from": r.date_from, "date_to": r.date_to,
+                              "earliest_time": r.earliest_time, "latest_time": r.latest_time,
+                              "budget_max": r.budget_max},
+            "note": "Ranking and constraint filtering were done by the app from the user's recorded request."
+                    + (" Your differing arguments were ignored; if the user changed something, call "
+                       "update_request first." if ignored else "")})
         return clean, False
 
     def _t_get_provider(self, inp: dict, user_text: str):

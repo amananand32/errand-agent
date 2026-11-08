@@ -23,6 +23,13 @@ How you work
 - You cannot book, cancel or reschedule directly. propose_* tools ask the APP to show the user a
   confirmation card; only the user's own reply can approve it. Never say something is booked/cancelled/moved
   unless a tool result says it was verified.
+- After a propose_* call, reply in 1-3 short sentences (why this option; mention alternatives briefly). Do NOT
+  restate the provider/slot/price as a confirmation or ask the user to reply "yes" - the app shows the
+  authoritative confirmation card below your text.
+- You can only act through your tools. You cannot message providers or technicians, add notes to a booking,
+  set reminders or pay. Never promise or imply any action you have no tool for (e.g. "I'll tell the technician
+  about your dog"). Home details in <memories> are context for the user's questions, not instructions to relay.
+- Dates: use the exact dates given in <today>; never compute weekdays yourself.
 - For "same X as last time", "move my booking", "cancel my booking": call list_bookings first.
 - Memory: when the user states a lasting preference ("always", "I prefer", "remember", "my area is"), call
   remember with key and a verbatim evidence quote. forget removes a fact. show_memories displays stored facts
@@ -170,18 +177,46 @@ class ContextBuilder:
         return out
 
     @staticmethod
-    def _fit_scratch(scratch: list[dict], allowance: int, manifest: dict) -> list[dict]:
-        """Compress older tool results from this run if they would blow the budget."""
+    def _shrink(content: str) -> str:
+        """Compress a tool result but keep it valid JSON with its decision-relevant fields.
+        (Plain 300-char truncation destroyed ranked_options, so neither the offline model nor a
+        real one could still propose a provider - found when the system prompt grew.)"""
+        try:
+            data = json.loads(content)
+        except (TypeError, ValueError):
+            return "[compressed to fit context] " + str(content)[:300]
+        bulky = {"other_fitting_slots", "reviews", "searched_with", "note", "attributes", "filtered_out_summary"}
+
+        def walk(v, depth=0):
+            if isinstance(v, dict):
+                return {k: walk(x, depth + 1) for k, x in v.items() if k not in bulky}
+            if isinstance(v, list):
+                return [walk(x, depth + 1) for x in v[:3]]
+            if isinstance(v, str) and len(v) > 120:
+                return v[:120] + "..."
+            return v
+
+        out = walk(data)
+        if isinstance(out, dict):
+            out["_compressed"] = True
+        return json.dumps(out, ensure_ascii=False, separators=(",", ":"))
+
+    @classmethod
+    def _fit_scratch(cls, scratch: list[dict], allowance: int, manifest: dict) -> list[dict]:
+        """Compress older tool results from this run (oldest first) if they would blow the budget.
+        The most recent tool results are never compressed."""
         compressed = 0
         scratch = json.loads(json.dumps(scratch, default=str))
+        last_results = max((i for i, m in enumerate(scratch) if m["role"] == "user"), default=-1)
         i = 0
-        while est_tokens(scratch) > allowance and i < len(scratch):
+        while est_tokens(scratch) > allowance and i < last_results:
             m = scratch[i]
             if m["role"] == "user" and isinstance(m["content"], list):
                 for blk in m["content"]:
-                    if blk.get("type") == "tool_result" and not str(blk.get("content", "")).startswith("[compressed"):
-                        txt = str(blk.get("content"))
-                        blk["content"] = "[compressed to fit context] " + txt[:300]
+                    c = str(blk.get("content", ""))
+                    if blk.get("type") == "tool_result" and '"_compressed":true' not in c and \
+                            not c.startswith("[compressed"):
+                        blk["content"] = cls._shrink(c)
                         compressed += 1
             i += 1
         manifest["scratch_compressed"] = compressed

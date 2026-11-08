@@ -21,3 +21,19 @@
     the provider had (correctly, per scenario) cancelled it. Fixed the invariant, not the agent.
   - S09: check read a stale `Proposal` object. Test bug.
 - Proved the 3 BUGS.md regression tests fail on the pre-fix code (temporarily reverted each fix) and pass after.
+
+## First live run (Groq, openai/gpt-oss-120b) - issues found and fixed
+Regression tests: `tests/test_live_issues.py`.
+- Model promised an untooled action ("I'll let the technician know about Bruno"). The contract has no notes
+  field. Prompt now forbids promising actions without a tool and says home details are context only.
+- Re-sending the identical request while a card was pending replaced a ₹650 option with a ₹1,100 one from a
+  different provider. Pre-pass now detects an identical repeat and keeps the pending proposal.
+- Date arithmetic: "this week" on Mon 9 Nov became ..12 Nov, then ..13 Nov. `<today>` now carries
+  precomputed ranges (this week, next week, weekend, next 8 days).
+- `search_providers` rejected mismatched model args, and the model then proposed from stale results. The
+  recorded request is now authoritative: the search always uses it and tells the model what it searched with.
+- Model latency showed 0ms: it was measured on the FakeClock. Now measured in real time, and the FakeClock is
+  advanced by it, so hold expiry and the wall-clock limit see real model latency.
+- Follow-on found by the suite: the longer prompt triggered in-run compression, which truncated the search
+  result to 300 raw chars and destroyed `ranked_options`. Compression now keeps valid JSON (top 3, bulky
+  fields dropped) and never compresses the latest tool results.

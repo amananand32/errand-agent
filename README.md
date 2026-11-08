@@ -7,7 +7,7 @@ preferences with provenance, follows up proactively when a provider cancels — 
 Everything runs locally against mock providers; there are no real payments or external services.
 
 ```
-python -m pytest                          # 64 tests incl. 34 eval scenarios -> reports/eval_table.md
+python -m pytest                          # 74 tests incl. 34 eval scenarios -> reports/eval_table.md
 python -m errand_agent.web --reset        # demo UI: chat | live trace  ->  http://localhost:8765
 python -m errand_agent.cli --reset --show-trace
 ```
