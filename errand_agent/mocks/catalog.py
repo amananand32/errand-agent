@@ -79,3 +79,29 @@ MEH_REVIEWS = [
 
 # Exactly which providers carry the injection review (at least one per the brief).
 INJECTED_PROVIDERS = {"PRV-PLB-03", "PRV-ELE-03"}
+
+
+SERVICE_SYNONYMS = {
+    "plumber": "plumbing", "plumbers": "plumbing", "plumbing": "plumbing",
+    "electrician": "electrical", "electricians": "electrical", "electric": "electrical", "electrical": "electrical",
+    "ac": "ac_service", "ac service": "ac_service", "ac servicing": "ac_service", "ac repair": "ac_service",
+    "air conditioner": "ac_service", "air conditioning": "ac_service", "ac_service": "ac_service",
+    "carpenter": "carpentry", "carpenters": "carpentry", "carpentry": "carpentry",
+    "cleaner": "cleaning", "cleaners": "cleaning", "home cleaning": "cleaning", "deep cleaning": "cleaning",
+    "cleaning": "cleaning",
+    "pest": "pest_control", "pest control": "pest_control", "pest_control": "pest_control",
+    "exterminator": "pest_control",
+}
+AREA_SYNONYMS = {"hsr": "HSR Layout", "hsr layout": "HSR Layout"}
+
+
+def normalize_service(value) -> str | None:
+    """Map what a model might send ('Plumber', 'AC servicing', 'pest-control') to a service id."""
+    v = str(value or "").strip().lower().replace("-", " ").replace("_", " ")
+    return SERVICE_SYNONYMS.get(v) or SERVICE_SYNONYMS.get(v.replace(" ", "_"))
+
+
+def normalize_area(value) -> str | None:
+    v = " ".join(str(value or "").strip().lower().replace(",", " ").split())
+    v = v.removesuffix(" bengaluru").removesuffix(" bangalore").strip()
+    return next((a for a in AREAS if a.lower() == v), None) or AREA_SYNONYMS.get(v)

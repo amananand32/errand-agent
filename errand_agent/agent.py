@@ -414,11 +414,12 @@ class Agent:
                 changed.append(k)
 
         if "service" in inp:
-            if inp["service"] not in catalog.SERVICES:
-                raise ValueError(f"unknown service {inp['service']}")
-            setf("service", inp["service"])
+            svc = catalog.normalize_service(inp["service"])
+            if not svc:
+                raise ValueError(f"unknown service {inp['service']!r}; use one of {sorted(catalog.SERVICES)}")
+            setf("service", svc)
         if "area" in inp:
-            area = next((a for a in catalog.AREAS if a.lower() == str(inp["area"]).lower()), None)
+            area = catalog.normalize_area(inp["area"])
             if not area:
                 raise ValueError(f"unsupported area {inp['area']!r}; supported: {catalog.AREAS}")
             setf("area", area)
@@ -530,9 +531,12 @@ class Agent:
         r = self.wf.request
         if self.wf.intent in (None, "book") and r.missing():
             return {"error": f"request incomplete; ask the user for: {', '.join(r.missing())}"}, True
+        norm = {"service": catalog.normalize_service, "area": catalog.normalize_area}
         for k in ("service", "area", "date_from", "date_to"):
             want = getattr(r, k)
-            if want and str(inp.get(k, "")).lower() != str(want).lower():
+            got = inp.get(k, "")
+            got = (norm[k](got) or got) if k in norm else got
+            if want and str(got).lower() != str(want).lower():
                 self.tracer.event("search_args_mismatch", field=k, model_value=inp.get(k), request_value=want)
                 return {"error": f"search {k} must match the user's request ({want}); call update_request "
                                  "first if the user changed it"}, True

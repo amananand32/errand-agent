@@ -101,3 +101,22 @@ def test_model_not_found_without_alternative_is_a_clear_config_error(monkeypatch
     monkeypatch.setattr(m, "list_models", lambda: ["whisper-large-v3"])
     with pytest.raises(oc.ModelConfigError, match="check_llm --model groq --list"):
         m.complete("sys", [{"role": "user", "content": "hi"}], [])
+
+
+def test_service_and_area_synonyms_from_open_models():
+    """Seen with Groq gpt-oss-120b: service='plumber' instead of 'plumbing'."""
+    from errand_agent.mocks import catalog
+    assert catalog.normalize_service("plumber") == "plumbing"
+    assert catalog.normalize_service("AC servicing") == "ac_service"
+    assert catalog.normalize_service("pest-control") == "pest_control"
+    assert catalog.normalize_service("gardener") is None
+    assert catalog.normalize_area("hsr") == "HSR Layout"
+    assert catalog.normalize_area("Indiranagar, Bengaluru") == "Indiranagar"
+    env = Env("synonyms")
+    out, err = env.agent._t_update_request({"intent": "book", "service": "Plumber", "area": "koramangala",
+                                            "evidence": "I need a plumber in Koramangala"},
+                                           "I need a plumber in Koramangala")
+    assert not err and out["request"]["service"] == "plumbing" and out["request"]["area"] == "Koramangala"
+    out, err = env.agent._dispatch("update_request", {"service": "gardener", "evidence": "I need a plumber"},
+                                   "I need a plumber")
+    assert err and "plumbing" in out["message"]   # the model is told the valid values
