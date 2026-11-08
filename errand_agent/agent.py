@@ -77,6 +77,9 @@ class Agent:
         self.context_log: list[ContextPacket] = []   # in-memory copy for tests / debugging
         self.notices: list[str] = []
         self._carry_verified: list[Outcome] = []
+        self._verified: list[Outcome] = []      # per-turn fields, reset in handle()
+        self._direct: list[str] = []
+        self._flags: set[str] = set()
         self._startup_recovery()
 
     # ------------------------------------------------------------------ util
