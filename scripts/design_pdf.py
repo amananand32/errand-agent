@@ -2,6 +2,10 @@
 import re
 import sys
 
+from reportlab import rl_config
+
+rl_config.invariant = 1   # reproducible output (no timestamps/random ids)
+
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
