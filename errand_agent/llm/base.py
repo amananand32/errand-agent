@@ -30,6 +30,7 @@ class ModelResponse:
 
 class Model:
     name = "abstract"
+    remote = False   # True for real APIs: latency is measured in real time and advances a FakeClock
 
     def complete(self, system: str, messages: list[dict], tools: list[dict]) -> ModelResponse:
         raise NotImplementedError
@@ -42,6 +43,7 @@ class AnthropicModel(Model):
         import anthropic  # lazy: evals never need it
 
         self.client = anthropic.Anthropic()
+        self.remote = True
         self.name = model
         self.max_tokens = max_tokens
         self.temperature = temperature
@@ -69,6 +71,7 @@ class RecordingModel(Model):
 
     def __init__(self, inner: Model, path: str):
         self.inner, self.path, self.name = inner, path, inner.name
+        self.remote = getattr(inner, "remote", False)
 
     def complete(self, system, messages, tools):
         r = self.inner.complete(system, messages, tools)

@@ -46,6 +46,8 @@ def test_prompt_forbids_promising_untooled_actions():
 
 
 class SlowRuleModel(RuleModel):
+    remote = True   # behaves like a slow remote API
+
     def complete(self, *a, **k):
         time.sleep(0.05)
         return super().complete(*a, **k)
@@ -78,3 +80,15 @@ def test_full_booking_still_works_after_fixes():
     env.say(REQ)
     r = env.say("yes")
     assert r.outcome == "booked" and len(env.new_bookings()) == 1
+
+
+def test_offline_traces_are_deterministic():
+    """The committed sample trace must not change between test runs."""
+    from errand_agent.mocks.service import ScenarioConfig as SC
+    outs = []
+    for i in range(2):
+        env = Env(f"det_{i}", config=SC(book_outcomes=["timeout_booked"]))
+        env.say(REQ)
+        env.say("yes")
+        outs.append([{k: v for k, v in e.items() if k != "run_id"} for e in env.events])
+    assert outs[0] == outs[1]

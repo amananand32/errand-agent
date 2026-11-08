@@ -373,8 +373,9 @@ class Agent:
                 self.tracer.event("model_error", attempt=attempt, error=f"{type(e).__name__}: {e}")
                 self.clock.sleep(self.limits.backoff_base_s * 2 ** (attempt - 1))
                 continue
-            real_s = time.perf_counter() - t0
-            if hasattr(self.clock, "advance"):
+            # Offline models are instant by design; keep their traces deterministic.
+            real_s = time.perf_counter() - t0 if getattr(self.model, "remote", False) else 0.0
+            if real_s and hasattr(self.clock, "advance"):
                 # Simulated clock: account for real model latency so holds expire and the
                 # wall-clock limit applies as they would in production.
                 self.clock.advance(seconds=real_s)

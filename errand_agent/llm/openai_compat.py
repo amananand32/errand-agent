@@ -129,6 +129,7 @@ class OpenAICompatModel(Model):
         if not self.name:
             raise ModelConfigError("set ERRAND_MODEL to the model id")
         self.provider = provider
+        self.remote = True
         self.max_tokens, self.temperature = max_tokens, temperature
         self.timeout_s, self.max_retries = timeout_s, max_retries
 
