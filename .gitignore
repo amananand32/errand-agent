@@ -8,3 +8,4 @@ reports/runs/
 *.db-shm
 reports/eval_table.partial.*
 .env
+.DS_Store
